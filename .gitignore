@@ -1,0 +1,6 @@
+/.local/
+/.openai/
+/.env
+__pycache__/
+*.py[cod]
+*.lnk

@@ -1,0 +1,48 @@
+'use strict';
+const fs = require('fs');
+const vm = require('vm');
+const assert = require('assert');
+const nodes = {};
+function element() { return {innerHTML:'',disabled:false,addEventListener:function(){}}; }
+const context = {document:{getElementById:function(id){return nodes[id] || (nodes[id]=element());}},fetch:function(){return Promise.resolve({ok:true,json:function(){return Promise.resolve({providers:[{id:'claude',status:'unavailable',windows:[]},{id:'codex',status:'ok',snapshotAt:'2026-11-11T00:00:00Z',windows:[{label:'5h',used:5,reset:'2030-01-01T00:00:00Z',durationMinutes:300}]},{id:'gemini',status:'unavailable',windows:[]}]});}});},setInterval:function(){}};
+vm.createContext(context);
+vm.runInContext(fs.readFileSync(__dirname+'/dist/app.js','utf8'),context);
+const now = Date.parse('2030-01-01T00:00:00Z');
+context.fixedNow = now;
+const spare = vm.runInContext("paceData({used:20,reset:'2030-01-01T03:00:00Z',durationMinutes:300},fixedNow)",context);
+assert.strictEqual(spare.time,60);
+assert.strictEqual(spare.quota,80);
+assert.strictEqual(spare.delta,20);
+assert.strictEqual(spare.tone,'spare');
+const fast = vm.runInContext("paceData({used:80,reset:'2030-01-01T03:00:00Z',durationMinutes:300},fixedNow)",context);
+assert.strictEqual(fast.delta,-40);
+assert.strictEqual(fast.tone,'fast');
+assert.strictEqual(vm.runInContext("paceData({used:20,reset:'2030-01-01T03:00:00Z'},fixedNow)",context),null);
+assert.strictEqual(vm.runInContext("paceData({used:20,reset:'2029-01-01T03:00:00Z',durationMinutes:300},fixedNow)",context),null);
+assert.strictEqual(vm.runInContext("paceData({used:20,reset:'2030-01-02T03:00:00Z',durationMinutes:300},fixedNow)",context),null);
+setTimeout(function(){
+ assert(nodes.cards.innerHTML.indexOf('Claude Code')>=0);
+ assert(nodes.cards.innerHTML.indexOf('Codex')>=0);
+ assert(nodes.cards.innerHTML.indexOf('Gemini')>=0);
+ assert(nodes.cards.innerHTML.indexOf('95')>=0);
+ assert.strictEqual(nodes.refresh.disabled,false);
+ assert(nodes.cards.innerHTML.indexOf('diagnostic')<0);
+ console.log('UI passed: three services, remaining quota, time comparison and unknown/expired periods.');
+},50);
+
+context.chartFixture={start:0,end:900,quotaHistory:{five_hour:[{time:100,remaining:80,reset:2000},{time:200,remaining:60,reset:2000},{time:300,remaining:100,reset:3000}],seven_day:[]}};
+const series=vm.runInContext("chartSeries(chartFixture,'five_hour')",context);
+assert.strictEqual(series.length,3);
+assert.strictEqual(series[0].remaining,80);
+assert.strictEqual(vm.runInContext("chartSeries(chartFixture,'seven_day').length",context),0);
+const chart=vm.runInContext("chartHtml(chartFixture,'five_hour')",context);
+assert.strictEqual((chart.match(/class="chart-line"/g)||[]).length,1);
+assert.strictEqual((chart.match(/class="chart-point"/g)||[]).length,3);
+assert(chart.indexOf('100%')>=0);
+assert(chart.indexOf('NaN')<0);
+assert(chart.indexOf('Infinity')<0);
+const emptyChart=vm.runInContext("chartHtml({start:0,end:900,quotaHistory:{}},'five_hour')",context);
+assert(emptyChart.indexOf('<svg')<0);
+const gapChart=vm.runInContext("chartHtml({start:0,end:1800,quotaHistory:{five_hour:[{time:1,remaining:80,reset:2000},{time:1500,remaining:30,reset:2000}]}},'five_hour')",context);
+assert.strictEqual((gapChart.match(/class="chart-line"/g)||[]).length,0);
+console.log('Quota chart passed: observed remaining percentage, fixed scale, reset/gap breaks, no fabricated history.');
